@@ -43,6 +43,10 @@ or out of range.
    Genshin runs elevated, so key presses from a non-elevated app are
    silently ignored by Windows.
 
+> Every `python`/`pip` command in this README also works as
+> `python3`/`pip3` — use whichever your system provides (on macOS/Linux
+> it's usually `python3`).
+
 ## Usage
 
 1. Click **Open MIDI...** and pick a `.mid` file. The validation report
@@ -71,10 +75,10 @@ not cross-compile, so build on the OS you target.
 
 Without `pydirectinput` the app runs in **dry-run mode**: key presses are
 logged in the window instead of sent, so song timing can be checked
-without the game. Run the tests with:
+without the game. Run the app with `python3 app.py` and the tests with:
 
 ```
-python -m pytest tests/
+python3 -m pytest tests/
 ```
 
 ## Notes
