@@ -35,21 +35,8 @@ def main():
             "--onefile",
             "--windowed",
             "--uac-admin",
-        ]
-
-    elif sys.platform == "darwin":  # macOS
-        args += [
-            "--windowed",
-            "--onedir",  # required for .app bundle
-        ]
-
-        # Optional but recommended for mac polish
-        # args += ["--icon=icon.icns"]
-
-    else:  # Linux
-        args += [
-            "--onefile",
-        ]
+            "--add-data", "assets;assets",
+    ]
 
     raise SystemExit(subprocess.call(args))
 

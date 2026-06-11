@@ -1,0 +1,46 @@
+name: Build and Release (Windows)
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install pyinstaller
+          if exist requirements.txt pip install -r requirements.txt
+
+      - name: Build executable
+        run: python build.py
+
+      - name: Rename artifact (optional but cleaner)
+        run: |
+          mkdir output
+          copy dist\GenshinInstrumentPlayer.exe output\GenshinInstrumentPlayer.exe
+
+      - name: Upload artifact (for debugging)
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: output/*
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: output/GenshinInstrumentPlayer.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
