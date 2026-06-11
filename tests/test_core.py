@@ -11,7 +11,7 @@ from input_backends import DryRunInput
 from keymap import NOTE_TO_KEY, is_in_c_major, note_name
 from midi_loader import NoteEvent, load_midi
 from player import Player, build_chords
-from validator import apply_shift, validate
+from validator import apply_shift, detect_transposition, validate
 
 
 def ev(*notes, spacing=0.5):
@@ -42,6 +42,7 @@ def test_note_names():
 def test_valid_c_major_song_passes():
     result = validate(ev(60, 62, 64, 65, 67, 69, 71, 72))
     assert result.ok
+    assert result.semitone_shift == 0
     assert result.octave_shift == 0
     assert result.note_count == 8
 
@@ -50,7 +51,39 @@ def test_a_minor_song_passes_same_pitch_classes():
     # A minor (relative of C major) uses the same white keys.
     result = validate(ev(57, 60, 64, 69, 71, 72, 76, 81))  # A3..A5
     assert result.ok
+    assert result.semitone_shift == 0
     assert result.octave_shift == 0
+
+
+def test_g_major_song_is_transposed_to_c_major():
+    # Full G major scale -> only the shift G->C (up 5 semitones) fits.
+    g_major = ev(55, 57, 59, 60, 62, 64, 66, 67)  # G3 A3 B3 C4 D4 E4 F#4 G4
+    result = validate(g_major)
+    assert result.ok
+    assert result.semitone_shift == 5
+    # After transposing, every note lands on a white key.
+    shifted = apply_shift(g_major, result.total_shift)
+    assert all(is_in_c_major(e.note) for e in shifted)
+
+
+def test_e_minor_song_is_transposed_to_a_minor():
+    # E minor shares G major's notes; transposing up 5 lands on A minor.
+    e_minor = ev(52, 54, 55, 57, 59, 60, 62)  # E3 F#3 G3 A3 B3 C4 D4
+    result = validate(e_minor)
+    assert result.ok
+    assert result.semitone_shift == 5
+    shifted = apply_shift(e_minor, result.total_shift)
+    assert all(is_in_c_major(e.note) for e in shifted)
+
+
+def test_detect_transposition_prefers_no_shift_when_already_in_key():
+    assert detect_transposition(ev(60, 62, 64, 65, 67, 69, 71)) == 0
+
+
+def test_detect_transposition_finds_downward_shift():
+    # Full D-flat major scale -> unique fit is down 1 semitone to C major.
+    db_major = ev(61, 63, 65, 66, 68, 70, 72)  # C# D# F F# G# A# C
+    assert detect_transposition(db_major) == -1
 
 
 def test_empty_song_rejected():
@@ -59,11 +92,13 @@ def test_empty_song_rejected():
     assert "no playable notes" in result.errors[0]
 
 
-def test_accidentals_rejected_with_names():
-    result = validate(ev(60, 61, 66))
+def test_chromatic_song_rejected_with_names():
+    # Three consecutive semitones never fit any major scale -> not transposable.
+    result = validate(ev(60, 61, 62))
     assert not result.ok
+    assert result.semitone_shift == 0
     assert "C#4" in result.errors[0]
-    assert "F#4" in result.errors[0]
+    assert "chromatic" in result.errors[0]
 
 
 def test_range_over_three_octaves_rejected():
@@ -92,8 +127,9 @@ def test_span_crossing_c_boundary_rejected():
     assert "C-to-B" in result.errors[0]
 
 
-def test_accidentals_and_range_both_reported():
-    result = validate(ev(30, 61, 90))
+def test_chromatic_and_range_both_reported():
+    # {C, C#, D} cluster (chromatic) spread over more than 3 octaves.
+    result = validate(ev(60, 61, 98))
     assert not result.ok
     assert len(result.errors) == 2
 

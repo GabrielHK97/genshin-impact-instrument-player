@@ -13,19 +13,26 @@ The in-game instruments expose 3 octaves of the C major scale:
 | Middle | A S D F G H J | C4 - B4 |
 | Low | Z X C V B N M | C3 - B3 |
 
-The app loads a MIDI file (all tracks merged, percussion ignored) and
-**strictly validates** it:
+The app loads a MIDI file (all tracks merged, percussion ignored), then
+validates and prepares it:
 
-- every note must be in the **C major scale** (white keys only — songs in
-  **A minor** work too, since it's the relative minor with the same notes);
-- all notes must fit one **C-to-B aligned 3-octave window**. Whole-octave
-  shifts to line the song up with C3-B5 are applied automatically and are
-  lossless. Note for A minor songs: because the window is C-aligned, a
-  melody centered on A effectively has less usable range — songs that
-  overflow the window are rejected with a report.
+- **Automatic transposition.** The white keys C3-B5 are exactly the C major
+  scale (and its relative, A minor). A song written in any other major or
+  minor key is automatically transposed by whole semitones so every note
+  lands on a white key. This changes the key the song plays in, not the
+  melody, so it stays faithful. A song already in C major / A minor is left
+  untouched.
+- **Octave fitting.** Whole-octave shifts to line the song up with C3-B5 are
+  applied automatically and are lossless.
 
-Files that fail get a report listing exactly which notes are out of scale
-or out of range.
+A file is only rejected when it genuinely can't be played:
+
+- it is **chromatic** — its notes don't all fit any single major/minor key,
+  so no transposition can map them onto the white keys; or
+- its range spans **more than 3 octaves**, or crosses a C-to-B octave
+  boundary in a way no octave shift can fit into the C3-B5 window.
+
+Rejected files get a report listing exactly which notes are the problem.
 
 ## Setup (Windows, same PC as the game)
 

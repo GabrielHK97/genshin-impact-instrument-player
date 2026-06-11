@@ -110,12 +110,13 @@ class App:
                 self._log_line(f"  • {error}", "error")
             self._log_line(
                 "\nThe instrument plays only the white keys C3-B5 (C major / "
-                "A minor). Songs in other keys, or wider than one C-to-B "
-                "3-octave window, are rejected.", "info",
+                "A minor). Songs in other keys are transposed automatically, "
+                "but a chromatic song (no single key fits its notes), or one "
+                "wider than 3 octaves, can't be played.", "info",
             )
             return
 
-        chords = build_chords(apply_shift(events, result.octave_shift))
+        chords = build_chords(apply_shift(events, result.total_shift))
         self.player.load(chords)
         self.song_name = os.path.basename(path)
         minutes, seconds = divmod(int(result.duration), 60)
@@ -124,6 +125,12 @@ class App:
             f"  {result.note_count} notes in {len(chords)} chords, "
             f"{minutes}:{seconds:02d}, range {result.note_range[0]}-{result.note_range[1]}", "ok",
         )
+        if result.semitone_shift:
+            self._log_line(
+                f"  Transposed {abs(result.semitone_shift)} semitone(s) "
+                f"{'up' if result.semitone_shift > 0 else 'down'} into "
+                f"C major / A minor (the song wasn't in that key).", "info",
+            )
         if result.octave_shift:
             self._log_line(
                 f"  Shifted {abs(result.octave_shift) // 12} octave(s) "
