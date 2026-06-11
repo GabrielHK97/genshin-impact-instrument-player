@@ -14,7 +14,7 @@ from tkinter import filedialog
 from input_backends import create_backend
 from midi_loader import load_midi
 from player import Player, build_chords
-from validator import apply_shift, validate
+from validator import apply_adaptation, validate
 
 POLL_MS = 100
 
@@ -110,13 +110,13 @@ class App:
                 self._log_line(f"  • {error}", "error")
             self._log_line(
                 "\nThe instrument plays only the white keys C3-B5 (C major / "
-                "A minor). Songs in other keys are transposed automatically, "
-                "but a chromatic song (no single key fits its notes), or one "
-                "wider than 3 octaves, can't be played.", "info",
+                "A minor). Songs in other keys are transposed, and songs wider "
+                "than 3 octaves are folded to fit -- but a chromatic song (no "
+                "single key fits its notes) can't be played.", "info",
             )
             return
 
-        chords = build_chords(apply_shift(events, result.total_shift))
+        chords = build_chords(apply_adaptation(events, result))
         self.player.load(chords)
         self.song_name = os.path.basename(path)
         minutes, seconds = divmod(int(result.duration), 60)
@@ -135,6 +135,12 @@ class App:
             self._log_line(
                 f"  Shifted {abs(result.octave_shift) // 12} octave(s) "
                 f"{'up' if result.octave_shift > 0 else 'down'} to fit the C3-B5 keys.", "info",
+            )
+        if result.compressed:
+            self._log_line(
+                f"  Compressed {result.folded_count} of {result.note_count} note(s) "
+                f"by octaves — the song was wider than 3 octaves, so the melody "
+                f"stays put and the outliers (usually bass) fold into range.", "info",
             )
         self._log_line(
             "\nSwitch to the game with the instrument open, then press F6.", "info",

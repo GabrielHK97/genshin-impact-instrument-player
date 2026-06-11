@@ -24,15 +24,20 @@ validates and prepares it:
   untouched.
 - **Octave fitting.** Whole-octave shifts to line the song up with C3-B5 are
   applied automatically and are lossless.
+- **Range compression.** A song wider than 3 octaves is folded to fit. The
+  window is placed where the *fewest* notes fall outside it, so the melody
+  (the largest in-range band) stays put — or moves as one block, which keeps
+  its shape exactly — while the outliers (usually the bass) fold by whole
+  octaves into range. Folds preserve pitch class, so the result stays in-key.
 
 A file is only rejected when it genuinely can't be played:
 
 - it is **chromatic** — its notes don't all fit any single major/minor key,
-  so no transposition can map them onto the white keys; or
-- its range spans **more than 3 octaves**, or crosses a C-to-B octave
-  boundary in a way no octave shift can fit into the C3-B5 window.
+  so no transposition can map them onto the white keys.
 
 Rejected files get a report listing exactly which notes are the problem.
+Anything diatonic is always made playable (transposed, octave-fitted, and
+compressed if needed).
 
 ## Setup (Windows, same PC as the game)
 

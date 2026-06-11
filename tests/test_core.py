@@ -8,10 +8,16 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from input_backends import DryRunInput
-from keymap import NOTE_TO_KEY, is_in_c_major, note_name
+from keymap import HIGHEST_NOTE, LOWEST_NOTE, NOTE_TO_KEY, is_in_c_major, note_name
 from midi_loader import NoteEvent, load_midi
 from player import Player, build_chords
-from validator import apply_shift, detect_transposition, validate
+from validator import (
+    apply_adaptation,
+    apply_shift,
+    choose_octave_shift,
+    detect_transposition,
+    validate,
+)
 
 
 def ev(*notes, spacing=0.5):
@@ -101,16 +107,22 @@ def test_chromatic_song_rejected_with_names():
     assert "no single key" in result.errors[0]
 
 
-def test_range_over_three_octaves_rejected():
+def test_wide_range_is_compressed_not_rejected():
     result = validate(ev(36, 84))  # C2 to C6 = 4 octaves
-    assert not result.ok
-    assert "more than 3 octaves" in result.errors[0]
+    assert result.ok
+    assert result.compressed
+    assert result.folded_count >= 1
+    out = apply_adaptation(ev(36, 84), result)
+    assert all(LOWEST_NOTE <= e.note <= HIGHEST_NOTE for e in out)
+    assert all(is_in_c_major(e.note) for e in out)
 
 
-def test_out_of_range_but_octave_shiftable_passes():
+def test_out_of_range_but_octave_shiftable_passes_without_folding():
     result = validate(ev(36, 40, 43))  # C2 E2 G2, one octave below range
     assert result.ok
     assert result.octave_shift == 12
+    assert not result.compressed
+    assert result.folded_count == 0
     assert result.note_range == ("C3", "G3")
 
 
@@ -118,20 +130,55 @@ def test_high_song_shifts_down():
     result = validate(ev(96, 100))  # C7 E7
     assert result.ok
     assert result.octave_shift == -24
+    assert not result.compressed
 
 
-def test_span_crossing_c_boundary_rejected():
-    # A2 to G5 spans < 3 octaves but no C-aligned window holds it.
+def test_span_crossing_c_boundary_is_compressed():
+    # A2 to G5 spans < 3 octaves but no C-aligned window holds it -> fold.
     result = validate(ev(45, 79))
-    assert not result.ok
-    assert "C-to-B" in result.errors[0]
+    assert result.ok
+    assert result.compressed
+    out = apply_adaptation(ev(45, 79), result)
+    assert all(LOWEST_NOTE <= e.note <= HIGHEST_NOTE for e in out)
 
 
-def test_chromatic_and_range_both_reported():
-    # {C, C#, D} cluster (chromatic) spread over more than 3 octaves.
+def test_chromatic_rejected_even_when_wide():
+    # A chromatic note is rejected for key; the wide range would have folded.
     result = validate(ev(60, 61, 98))
     assert not result.ok
-    assert len(result.errors) == 2
+    assert len(result.errors) == 1
+    assert "no single key" in result.errors[0]
+
+
+def test_compression_keeps_melody_intervals_intact():
+    # A compact upper melody plus one deep bass note, spanning > 3 octaves.
+    melody = [72, 74, 76, 77, 79]  # C5 D5 E5 F5 G5
+    events = ev(*(melody + [36]))  # + C2 bass, four octaves below the top
+    result = validate(events)
+    assert result.ok and result.compressed
+    out = [e.note for e in apply_adaptation(events, result)]
+    # The melody moves as one block, so its internal intervals are unchanged.
+    orig_diffs = [b - a for a, b in zip(melody, melody[1:])]
+    out_diffs = [b - a for a, b in zip(out[:5], out[1:5])]
+    assert out_diffs == orig_diffs
+    # The lone bass outlier is the note that got folded into range.
+    assert result.folded_count == 1
+    assert LOWEST_NOTE <= out[-1] <= HIGHEST_NOTE
+
+
+def test_choose_octave_shift_zero_folds_when_it_fits():
+    # A song that fits gets a fold-free placement equal to the old fit logic.
+    notes = [60 + s for s in (0, 2, 4, 5, 7, 9, 11)]  # C major octave, in range
+    assert choose_octave_shift(notes) == 0
+
+
+def test_apply_adaptation_makes_everything_playable():
+    events = ev(24, 36, 60, 96, 108)  # C1..C8, all C's, diatonic but huge span
+    result = validate(events)
+    assert result.ok and result.compressed
+    out = apply_adaptation(events, result)
+    assert all(LOWEST_NOTE <= e.note <= HIGHEST_NOTE for e in out)
+    assert all(e.note % 12 == 0 for e in out)  # every C folds onto a C key
 
 
 def test_apply_shift():

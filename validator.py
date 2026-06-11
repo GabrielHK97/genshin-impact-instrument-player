@@ -50,14 +50,14 @@ TICKS_PER_SECOND = 960
 NOTE_TICKS = 40  # short "button tap" so notes never hang
 
 
-def save_clean_midi(events: list[NoteEvent], total_shift: int, output_path: str):
-    """Apply the shift and save a single-track MIDI, preserving chords.
+def save_clean_midi(events: list[NoteEvent], output_path: str):
+    """Save already-adapted events as a single-track MIDI, preserving chords.
 
     We build one timeline of note_on/note_off events at absolute ticks and
     emit them sorted, so notes that share a start time stay simultaneous
     (a chord) instead of being serialized, and no timing drift accumulates.
     """
-    shifted_events = apply_shift(events, total_shift)
+    shifted_events = events
 
     mid = mido.MidiFile(ticks_per_beat=TICKS_PER_BEAT)
     track = mido.MidiTrack()
@@ -90,11 +90,13 @@ def save_clean_midi(events: list[NoteEvent], total_shift: int, output_path: str)
 class ValidationResult:
     ok: bool
     errors: list[str] = field(default_factory=list)
-    semitone_shift: int = 0        
-    octave_shift: int = 0          
+    semitone_shift: int = 0        # transposition to reach C major / A minor
+    octave_shift: int = 0          # uniform octave shift to place the 3-octave window
     note_count: int = 0
-    duration: float = 0.0          
-    note_range: tuple[str, str] | None = None  
+    duration: float = 0.0          # seconds
+    note_range: tuple[str, str] | None = None  # (lowest, highest) after adaptation
+    compressed: bool = False       # True if some notes were octave-folded to fit
+    folded_count: int = 0          # how many notes were folded into range
 
     @property
     def total_shift(self) -> int:
@@ -117,6 +119,39 @@ def _summarize(notes: Counter, limit: int = 10) -> str:
         shown += f", ... and {len(parts) - limit} more"
     return shown
 
+
+def _fold_into_window(pitch: int) -> int:
+    """Shift a note by whole octaves until it lands in C3-B5 (nearest in-range
+    octave). Octave moves preserve pitch class, so the note stays diatonic."""
+    while pitch > HIGHEST_NOTE:
+        pitch -= 12
+    while pitch < LOWEST_NOTE:
+        pitch += 12
+    return pitch
+
+
+def choose_octave_shift(notes: list[int]) -> int:
+    """Pick the uniform octave shift (a multiple of 12) that leaves the fewest
+    notes outside the C3-B5 window, tie-broken toward the original register.
+
+    Minimizing folds keeps the largest coherent band of notes -- almost always
+    the melody -- inside the window (or shifts it as one block, which preserves
+    its shape exactly), so only the smaller outlying band, usually the bass,
+    gets folded afterward. When the song already fits, this returns the same
+    smallest shift the old fit-or-reject logic did, with zero folds."""
+    lowest, highest = min(notes), max(notes)
+
+    def folds(shift: int) -> int:
+        return sum(1 for n in notes if not (LOWEST_NOTE <= n + shift <= HIGHEST_NOTE))
+
+    # Every octave placement where the window still overlaps the note range.
+    candidates = [
+        12 * k
+        for k in range((LOWEST_NOTE - highest) // 12 - 1, (HIGHEST_NOTE - lowest) // 12 + 2)
+    ]
+    return min(candidates, key=lambda s: (folds(s), abs(s)))
+
+
 def validate(events: list[NoteEvent]) -> ValidationResult:
     if not events:
         return ValidationResult(ok=False, errors=["The file contains no playable notes."])
@@ -131,6 +166,7 @@ def validate(events: list[NoteEvent]) -> ValidationResult:
         duration=events[-1].time,
     )
 
+    # Diatonic check: octave folding can fix the range, but never a wrong note.
     off_scale = Counter(n for n in notes if not is_in_c_major(n))
     if off_scale:
         result.ok = False
@@ -139,26 +175,30 @@ def validate(events: list[NoteEvent]) -> ValidationResult:
             f"{prefix}{sum(off_scale.values())} note(s) fall outside the "
             f"C major / A minor scale, with no single key that fits them all: {_summarize(off_scale)}"
         )
+        return result
 
-    lowest, highest = min(notes), max(notes)
-    if highest - lowest > HIGHEST_NOTE - LOWEST_NOTE:
-        result.ok = False
-        result.errors.append(f"Note range spans more than 3 octaves: {note_name(lowest)} to {note_name(highest)}.")
-    else:
-        shifts = [s for s in range(-120, 121, 12) if lowest + s >= LOWEST_NOTE and highest + s <= HIGHEST_NOTE]
-        if not shifts:
-            result.ok = False
-            result.errors.append(f"Notes ({note_name(lowest)} to {note_name(highest)}) cross a C-to-B octave boundary.")
-        else:
-            result.octave_shift = min(shifts, key=abs)
-            result.note_range = (note_name(lowest + result.octave_shift), note_name(highest + result.octave_shift))
-
+    # Place the 3-octave window, then fold any out-of-range notes to fit it.
+    result.octave_shift = choose_octave_shift(notes)
+    placed = [n + result.octave_shift for n in notes]
+    folded = [_fold_into_window(n) for n in placed]
+    result.folded_count = sum(1 for before, after in zip(placed, folded) if before != after)
+    result.compressed = result.folded_count > 0
+    result.note_range = (note_name(min(folded)), note_name(max(folded)))
     return result
+
 
 def apply_shift(events: list[NoteEvent], total_shift: int) -> list[NoteEvent]:
     if total_shift == 0:
         return events
     return [NoteEvent(time=e.time, note=e.note + total_shift) for e in events]
+
+
+def apply_adaptation(events: list[NoteEvent], result: ValidationResult) -> list[NoteEvent]:
+    """Turn raw events into the final playable notes: transpose to key, apply the
+    chosen octave placement, then fold any stragglers into C3-B5. For a song that
+    already fits, the fold is a no-op and this equals a plain uniform shift."""
+    shift = result.total_shift
+    return [NoteEvent(time=e.time, note=_fold_into_window(e.note + shift)) for e in events]
 
 # ==============================================================================
 # MAIN EXECUTION PIPELINE
@@ -189,10 +229,14 @@ def process_midi_pipeline(input_file: str, output_file: str) -> bool:
 
     print(f"➔ Diatonic alignment: transposed {result.semitone_shift} semitone(s).")
     print(f"➔ Octave alignment: shifted {result.octave_shift // 12} octave(s).")
+    if result.compressed:
+        print(f"➔ Range compression: folded {result.folded_count} of "
+              f"{result.note_count} note(s) by octaves to fit 3 octaves.")
     print(f"➔ Range achieved: {result.note_range[0]} to {result.note_range[1]}")
 
-    # 3. Apply the shift and export a single-track MIDI.
-    save_clean_midi(raw_events, result.total_shift, output_file)
+    # 3. Transpose + place + fold, then export a single-track MIDI.
+    adapted = apply_adaptation(raw_events, result)
+    save_clean_midi(adapted, output_file)
     return True
 
 
