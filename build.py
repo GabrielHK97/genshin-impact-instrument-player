@@ -35,8 +35,7 @@ def main():
             "--onefile",
             "--windowed",
             "--uac-admin",
-            "--add-data", "assets;assets",
-    ]
+        ]
 
     raise SystemExit(subprocess.call(args))
 
