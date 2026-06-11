@@ -3,8 +3,10 @@
 Usage:
     python build.py
 
-Output lands in dist/ (GenshinInstrumentPlayer.exe on Windows). Build on
-the OS you want to target — PyInstaller does not cross-compile.
+Output:
+    - Windows: dist/GenshinInstrumentPlayer.exe
+    - macOS:   dist/GenshinInstrumentPlayer.app
+    - Linux:   dist/GenshinInstrumentPlayer (binary)
 """
 
 import shutil
@@ -23,15 +25,31 @@ def main():
         sys.executable, "-m", "PyInstaller",
         "app.py",
         "--name", "GenshinInstrumentPlayer",
-        "--onefile",
-        "--windowed",
         "--noconfirm",
         "--clean",
     ]
+
+    # Platform-specific config
     if sys.platform == "win32":
-        # Genshin runs elevated; without elevation our key presses are
-        # ignored, so make the exe request admin on launch.
-        args.append("--uac-admin")
+        args += [
+            "--onefile",
+            "--windowed",
+            "--uac-admin",
+        ]
+
+    elif sys.platform == "darwin":  # macOS
+        args += [
+            "--windowed",
+            "--onedir",  # required for .app bundle
+        ]
+
+        # Optional but recommended for mac polish
+        # args += ["--icon=icon.icns"]
+
+    else:  # Linux
+        args += [
+            "--onefile",
+        ]
 
     raise SystemExit(subprocess.call(args))
 
