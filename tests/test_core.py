@@ -98,7 +98,7 @@ def test_chromatic_song_rejected_with_names():
     assert not result.ok
     assert result.semitone_shift == 0
     assert "C#4" in result.errors[0]
-    assert "chromatic" in result.errors[0]
+    assert "no single key" in result.errors[0]
 
 
 def test_range_over_three_octaves_rejected():

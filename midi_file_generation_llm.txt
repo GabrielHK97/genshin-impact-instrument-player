@@ -1,1 +1,0 @@
-Create an actual MIDI file. The MIDI file needs to be diatonic (fits one major/minor scale) and within a 3-octave range. Writing it in A minor (the song's actual key, and it maps directly onto the instrument's white keys C3–B5) means it'll validate with zero transposition. grab an accurate transcription of the {song name} by {artist} melody so it's actually recognizable.
