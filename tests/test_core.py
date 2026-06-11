@@ -98,13 +98,17 @@ def test_empty_song_rejected():
     assert "no playable notes" in result.errors[0]
 
 
-def test_chromatic_song_rejected_with_names():
-    # Three consecutive semitones never fit any major scale -> not transposable.
-    result = validate(ev(60, 61, 62))
-    assert not result.ok
-    assert result.semitone_shift == 0
-    assert "C#4" in result.errors[0]
-    assert "no single key" in result.errors[0]
+def test_chromatic_song_is_snapped_not_rejected():
+    # Three consecutive semitones never fit a scale -> the odd note is snapped.
+    result = validate(ev(60, 61, 62))  # C C# D
+    assert result.ok
+    assert result.chromatic
+    assert result.snapped_count == 1
+    out = apply_adaptation(ev(60, 61, 62), result)
+    assert all(is_in_c_major(e.note) for e in out)
+    assert all(LOWEST_NOTE <= e.note <= HIGHEST_NOTE for e in out)
+    # C# sits between C and D, both equally common here -> flattens down to C.
+    assert out[1].note == 60
 
 
 def test_wide_range_is_compressed_not_rejected():
@@ -142,12 +146,44 @@ def test_span_crossing_c_boundary_is_compressed():
     assert all(LOWEST_NOTE <= e.note <= HIGHEST_NOTE for e in out)
 
 
-def test_chromatic_rejected_even_when_wide():
-    # A chromatic note is rejected for key; the wide range would have folded.
-    result = validate(ev(60, 61, 98))
-    assert not result.ok
-    assert len(result.errors) == 1
-    assert "no single key" in result.errors[0]
+def test_chromatic_and_wide_are_both_handled():
+    # An off-scale note AND a 3+ octave span: snap the note, fold the range.
+    result = validate(ev(60, 61, 98))  # C C# D7
+    assert result.ok
+    assert result.chromatic and result.snapped_count == 1
+    assert result.compressed
+    out = apply_adaptation(ev(60, 61, 98), result)
+    assert all(is_in_c_major(e.note) for e in out)
+    assert all(LOWEST_NOTE <= e.note <= HIGHEST_NOTE for e in out)
+
+
+def test_snap_prefers_more_common_neighbor():
+    # Full C major scale (pins the key) + extra G's + one F#. F# is equidistant
+    # from F and G, but G is far more common here, so F# snaps up to G.
+    events = ev(60, 62, 64, 65, 67, 69, 71, 67, 67, 66)
+    result = validate(events)
+    assert result.ok and result.chromatic and result.snapped_count == 1
+    assert result.snap_delta == {6: 1}  # F# -> G
+    out = apply_adaptation(events, result)
+    assert out[-1].note == 67  # the F# became G4
+    assert all(is_in_c_major(e.note) for e in out)
+
+
+def test_snap_tie_flattens_down():
+    # Full C major scale + one F#; F and G occur equally -> tie -> flatten to F.
+    events = ev(60, 62, 64, 65, 67, 69, 71, 66)
+    result = validate(events)
+    assert result.chromatic and result.snap_delta == {6: -1}  # F# -> F
+    out = apply_adaptation(events, result)
+    assert out[-1].note == 65  # F4
+
+
+def test_diatonic_song_is_not_marked_chromatic():
+    result = validate(ev(60, 62, 64, 65, 67, 69, 71))  # clean C major
+    assert result.ok
+    assert not result.chromatic
+    assert result.snapped_count == 0
+    assert result.snap_delta == {}
 
 
 def test_compression_keeps_melody_intervals_intact():

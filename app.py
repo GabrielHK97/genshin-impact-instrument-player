@@ -14,7 +14,7 @@ from tkinter import filedialog
 from input_backends import create_backend
 from midi_loader import load_midi
 from player import Player, build_chords
-from validator import apply_adaptation, validate
+from validator import apply_adaptation, describe_snaps, validate
 
 POLL_MS = 100
 
@@ -61,6 +61,7 @@ class App:
         self.report.pack(fill="both", expand=True, padx=10)
         self.report.tag_configure("ok", foreground="#1a7f37")
         self.report.tag_configure("error", foreground="#c62828")
+        self.report.tag_configure("warn", foreground="#b26a00")
         self.report.tag_configure("info", foreground="#555555")
 
         self.status = tk.Label(self.root, text="", anchor="w", relief="sunken")
@@ -135,6 +136,14 @@ class App:
             self._log_line(
                 f"  Shifted {abs(result.octave_shift) // 12} octave(s) "
                 f"{'up' if result.octave_shift > 0 else 'down'} to fit the C3-B5 keys.", "info",
+            )
+        if result.chromatic:
+            pct = round(100 * result.snapped_count / result.note_count)
+            self._log_line(
+                f"  ⚠ Chromatic song — {result.snapped_count} of {result.note_count} "
+                f"note(s) ({pct}%) were off-key and snapped to the nearest scale "
+                f"tone ({describe_snaps(result.snap_delta)}). Playback differs "
+                f"slightly from the original.", "warn",
             )
         if result.compressed:
             self._log_line(

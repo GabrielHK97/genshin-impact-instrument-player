@@ -29,15 +29,20 @@ validates and prepares it:
   (the largest in-range band) stays put — or moves as one block, which keeps
   its shape exactly — while the outliers (usually the bass) fold by whole
   octaves into range. Folds preserve pitch class, so the result stays in-key.
+- **Chromatic snapping.** After transposing to the best-fitting key, any
+  leftover off-scale notes (sharps/flats that don't belong to that key) are
+  nudged a semitone onto the nearest white key. An accidental sits exactly
+  between two white keys, so the tie is broken toward whichever neighbor is
+  **more common in the song** (the more harmonically central one), otherwise
+  it flattens down. The app **warns** you when this happens — telling you how
+  many notes (and what fraction) were adjusted and how (e.g. `F#→G, A#→A`) —
+  so you know playback differs slightly from the original.
 
-A file is only rejected when it genuinely can't be played:
-
-- it is **chromatic** — its notes don't all fit any single major/minor key,
-  so no transposition can map them onto the white keys.
-
-Rejected files get a report listing exactly which notes are the problem.
-Anything diatonic is always made playable (transposed, octave-fitted, and
-compressed if needed).
+The only files that can't be played are ones that **can't be read** as MIDI
+or contain **no notes** at all (e.g. a drums-only file once percussion is
+dropped). Any readable, non-empty MIDI is made playable: transposed,
+chromatically snapped if needed, octave-fitted, and compressed if wider than
+3 octaves.
 
 ## Setup (Windows, same PC as the game)
 

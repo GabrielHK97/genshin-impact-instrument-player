@@ -97,6 +97,9 @@ class ValidationResult:
     note_range: tuple[str, str] | None = None  # (lowest, highest) after adaptation
     compressed: bool = False       # True if some notes were octave-folded to fit
     folded_count: int = 0          # how many notes were folded into range
+    chromatic: bool = False        # True if off-scale notes had to be snapped
+    snapped_count: int = 0         # how many notes were snapped onto the scale
+    snap_delta: dict = field(default_factory=dict)  # pitch class -> +/-1 semitone nudge
 
     @property
     def total_shift(self) -> int:
@@ -112,12 +115,30 @@ def detect_transposition(events: list[NoteEvent]) -> int:
     best = max(range(12), key=lambda s: (in_scale_after(s), -abs(_signed(s))))
     return _signed(best)
 
-def _summarize(notes: Counter, limit: int = 10) -> str:
-    parts = [f"{note_name(n)} x{c}" for n, c in sorted(notes.items())]
-    shown = ", ".join(parts[:limit])
-    if len(parts) > limit:
-        shown += f", ... and {len(parts) - limit} more"
-    return shown
+_PITCH_CLASS_NAMES = ('C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B')
+
+
+def build_snap_map(notes: list[int]) -> dict:
+    """Map each off-scale (black-key) pitch class to a +/-1 semitone nudge onto
+    the nearest white key. Every accidental sits exactly between two white keys,
+    so the tie is broken toward whichever neighbor occurs more often in the song
+    (the more harmonically central one), falling back to flattening downward."""
+    counts = Counter(n % 12 for n in notes)
+    snap: dict[int, int] = {}
+    for pc in counts:
+        if pc in C_MAJOR_PITCH_CLASSES:
+            continue
+        # The neighbors one semitone below/above are always white keys.
+        snap[pc] = 1 if counts[(pc + 1) % 12] > counts[(pc - 1) % 12] else -1
+    return snap
+
+
+def describe_snaps(snap_delta: dict) -> str:
+    """Human-readable 'F#->G, A#->A' summary of a snap map."""
+    return ", ".join(
+        f"{_PITCH_CLASS_NAMES[pc]}->{_PITCH_CLASS_NAMES[(pc + d) % 12]}"
+        for pc, d in sorted(snap_delta.items())
+    )
 
 
 def _fold_into_window(pitch: int) -> int:
@@ -166,16 +187,12 @@ def validate(events: list[NoteEvent]) -> ValidationResult:
         duration=events[-1].time,
     )
 
-    # Diatonic check: octave folding can fix the range, but never a wrong note.
-    off_scale = Counter(n for n in notes if not is_in_c_major(n))
-    if off_scale:
-        result.ok = False
-        prefix = "even after transposing to the nearest key, " if semitone_shift else ""
-        result.errors.append(
-            f"{prefix}{sum(off_scale.values())} note(s) fall outside the "
-            f"C major / A minor scale, with no single key that fits them all: {_summarize(off_scale)}"
-        )
-        return result
+    # Snap any out-of-scale (chromatic) notes onto the nearest scale tone, so a
+    # song that doesn't fit one key is fixed up rather than rejected.
+    result.snap_delta = build_snap_map(notes)
+    result.snapped_count = sum(1 for n in notes if not is_in_c_major(n))
+    result.chromatic = result.snapped_count > 0
+    notes = [n + result.snap_delta.get(n % 12, 0) for n in notes]
 
     # Place the 3-octave window, then fold any out-of-range notes to fit it.
     result.octave_shift = choose_octave_shift(notes)
@@ -194,11 +211,16 @@ def apply_shift(events: list[NoteEvent], total_shift: int) -> list[NoteEvent]:
 
 
 def apply_adaptation(events: list[NoteEvent], result: ValidationResult) -> list[NoteEvent]:
-    """Turn raw events into the final playable notes: transpose to key, apply the
-    chosen octave placement, then fold any stragglers into C3-B5. For a song that
-    already fits, the fold is a no-op and this equals a plain uniform shift."""
-    shift = result.total_shift
-    return [NoteEvent(time=e.time, note=_fold_into_window(e.note + shift)) for e in events]
+    """Turn raw events into the final playable notes, in the same order validate
+    decided: transpose to key, snap off-scale notes onto the scale, apply the
+    chosen octave placement, then fold any stragglers into C3-B5. For a song
+    that's already diatonic and fits, every step is a no-op but the last."""
+    out = []
+    for e in events:
+        n = e.note + result.semitone_shift
+        n += result.snap_delta.get(n % 12, 0)
+        out.append(NoteEvent(time=e.time, note=_fold_into_window(n + result.octave_shift)))
+    return out
 
 # ==============================================================================
 # MAIN EXECUTION PIPELINE
@@ -228,6 +250,11 @@ def process_midi_pipeline(input_file: str, output_file: str) -> bool:
         return False
 
     print(f"➔ Diatonic alignment: transposed {result.semitone_shift} semitone(s).")
+    if result.chromatic:
+        pct = round(100 * result.snapped_count / result.note_count)
+        print(f"⚠ Chromatic song: snapped {result.snapped_count} of {result.note_count} "
+              f"note(s) ({pct}%) to the nearest scale tone "
+              f"[{describe_snaps(result.snap_delta)}] -- playback differs slightly.")
     print(f"➔ Octave alignment: shifted {result.octave_shift // 12} octave(s).")
     if result.compressed:
         print(f"➔ Range compression: folded {result.folded_count} of "
